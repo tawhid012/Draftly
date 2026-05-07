@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Draftly — My Writing Space</title>
+  <meta name="description" content="Draftly is your personal writing dashboard. Capture drafts, ideas, and notes in one calm, distraction-free space." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Lora:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ===================== LOGIN SCREEN ===================== -->
+  <div id="login-screen" class="login-screen">
+    <div class="login-card">
+      <div class="login-logo">
+        <span class="logo-icon">✦</span>
+        <h1>Draftly</h1>
+      </div>
+      <p class="login-tagline">Your personal writing space.</p>
+
+      <form id="login-form" class="login-form" autocomplete="off">
+        <div class="form-group">
+          <label for="login-email">Email</label>
+          <input type="email" id="login-email" placeholder="you@example.com" required />
+        </div>
+        <div class="form-group">
+          <label for="login-password">Password</label>
+          <input type="password" id="login-password" placeholder="••••••••" required />
+        </div>
+        <div id="login-error" class="login-error hidden"></div>
+        <button type="submit" id="login-btn" class="btn-primary">
+          <span id="login-btn-text">Sign In</span>
+          <span id="login-spinner" class="spinner hidden"></span>
+        </button>
+      </form>
+
+      <p class="login-footer">Private access only.</p>
+    </div>
+  </div>
+
+  <!-- ===================== ACCESS RESTRICTED ===================== -->
+  <div id="restricted-screen" class="restricted-screen hidden">
+    <div class="restricted-card">
+      <span class="restricted-icon">⊘</span>
+      <h2>Access Restricted</h2>
+      <p>This workspace is not available for your account.</p>
+      <button id="restricted-back-btn" class="btn-secondary">Go Back</button>
+    </div>
+  </div>
+
+  <!-- ===================== MAIN APP ===================== -->
+  <div id="app" class="app hidden">
+
+    <!-- NAVBAR -->
+    <nav class="navbar" id="navbar">
+      <div class="navbar-left">
+        <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar">
+          <span></span><span></span><span></span>
+        </button>
+        <a href="#" class="nav-brand">
+          <span class="logo-icon-sm">✦</span>
+          <span>Draftly</span>
+        </a>
+      </div>
+      <div class="navbar-center">
+        <span id="nav-title" class="nav-title">Dashboard</span>
+      </div>
+      <div class="navbar-right">
+        <div class="user-info">
+          <span id="nav-email" class="nav-email"></span>
+          <span id="nav-status" class="status-badge status-offline">Offline</span>
+        </div>
+        <button id="logout-btn" class="btn-logout">Logout</button>
+      </div>
+    </nav>
+
+    <!-- LAYOUT WRAPPER -->
+    <div class="layout">
+
+      <!-- SIDEBAR -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <span class="sidebar-label">Workspace</span>
+        </div>
+        <nav class="sidebar-nav">
+          <a href="#" class="nav-item" id="nav-dashboard">
+            <span class="nav-icon">⊡</span>
+            <span>Dashboard</span>
+          </a>
+          <a href="#" class="nav-item" id="nav-drafts">
+            <span class="nav-icon">✐</span>
+            <span>My Drafts</span>
+          </a>
+          <a href="#" class="nav-item" id="nav-tasks">
+            <span class="nav-icon">◻</span>
+            <span>Tasks</span>
+          </a>
+          <a href="#" class="nav-item" id="nav-ideas">
+            <span class="nav-icon">◈</span>
+            <span>Quick Notes</span>
+          </a>
+          <a href="#" class="nav-item disabled" id="nav-archive">
+            <span class="nav-icon">⊞</span>
+            <span>Archive</span>
+          </a>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="other-user-status" id="other-user-status">
+            <div class="other-user-dot" id="other-user-dot"></div>
+            <span id="other-user-label">Collaborator offline</span>
+          </div>
+        </div>
+      </aside>
+
+      <!-- MAIN CONTENT -->
+      <main class="main-content" id="main-content">
+
+        <!-- ── DASHBOARD VIEW ── -->
+        <div id="dashboard-view" class="view-section">
+          <div class="section-header">
+            <h2 class="section-title">Dashboard</h2>
+            <p class="section-subtitle">Your workspace at a glance</p>
+          </div>
+
+          <!-- Stats Cards -->
+          <div class="stats-grid">
+            <div class="stat-card">
+              <span class="stat-icon">◻</span>
+              <div class="stat-info">
+                <span class="stat-value" id="stat-total-tasks">—</span>
+                <span class="stat-label">Total Tasks</span>
+              </div>
+            </div>
+            <div class="stat-card">
+              <span class="stat-icon">✓</span>
+              <div class="stat-info">
+                <span class="stat-value" id="stat-done-tasks">—</span>
+                <span class="stat-label">Completed</span>
+              </div>
+            </div>
+            <div class="stat-card">
+              <span class="stat-icon">◈</span>
+              <div class="stat-info">
+                <span class="stat-value" id="stat-notes-count">—</span>
+                <span class="stat-label">Quick Notes</span>
+              </div>
+            </div>
+            <div class="stat-card">
+              <span class="stat-icon">✐</span>
+              <div class="stat-info">
+                <span class="stat-value" id="stat-drafts-count">—</span>
+                <span class="stat-label">Drafts</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Study Timer -->
+          <div class="dashboard-section">
+            <h3 class="subsection-title">Study Timer</h3>
+            <div class="timer-card">
+              <div class="timer-display" id="timer-display">00:00:00</div>
+              <div class="timer-controls">
+                <button class="timer-btn" id="timer-start">Start</button>
+                <button class="timer-btn" id="timer-pause" disabled>Pause</button>
+                <button class="timer-btn timer-btn-ghost" id="timer-reset">Reset</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Recent Tasks preview -->
+          <div class="dashboard-section">
+            <div class="subsection-row">
+              <h3 class="subsection-title">Recent Tasks</h3>
+              <a href="#" class="subsection-link" id="dash-goto-tasks">View all →</a>
+            </div>
+            <div id="dash-tasks-preview" class="dash-preview-list">
+              <p class="preview-empty">No tasks yet.</p>
+            </div>
+          </div>
+
+          <!-- Recent Notes preview -->
+          <div class="dashboard-section">
+            <div class="subsection-row">
+              <h3 class="subsection-title">Recent Notes</h3>
+              <a href="#" class="subsection-link" id="dash-goto-notes">View all →</a>
+            </div>
+            <div id="dash-notes-preview" class="dash-preview-list">
+              <p class="preview-empty">No notes yet.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── DRAFTS VIEW ── -->
+        <div id="drafts-view" class="drafts-view hidden">
+          <div class="drafts-header">
+            <div>
+              <h2 class="drafts-title">My Drafts</h2>
+              <p class="drafts-subtitle">Your personal writing entries</p>
+            </div>
+            <div class="drafts-meta">
+              <span id="typing-indicator" class="typing-indicator hidden"></span>
+            </div>
+          </div>
+
+          <!-- Messages Feed -->
+          <div class="messages-feed" id="messages-feed">
+            <div class="feed-empty" id="feed-empty">
+              <span class="feed-empty-icon">✦</span>
+              <p>No drafts yet. Start writing below.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── TASKS VIEW ── -->
+        <div id="tasks-view" class="view-section hidden">
+          <div class="section-header">
+            <h2 class="section-title">Tasks</h2>
+            <p class="section-subtitle">Track what needs to get done</p>
+          </div>
+
+          <div class="add-item-row">
+            <input type="text" id="task-input" class="add-input" placeholder="Add a new task..." maxlength="200" />
+            <button id="task-add-btn" class="btn-add">Add</button>
+          </div>
+
+          <div id="tasks-list" class="items-list">
+            <p class="list-empty" id="tasks-empty">No tasks yet. Add one above.</p>
+          </div>
+        </div>
+
+        <!-- ── QUICK NOTES VIEW ── -->
+        <div id="notes-view" class="view-section hidden">
+          <div class="section-header">
+            <h2 class="section-title">Quick Notes</h2>
+            <p class="section-subtitle">Capture ideas and thoughts instantly</p>
+          </div>
+
+          <div class="add-item-row">
+            <textarea id="note-input" class="add-input add-textarea" placeholder="Write a quick note..." maxlength="1000" rows="2"></textarea>
+            <button id="note-add-btn" class="btn-add">Save</button>
+          </div>
+
+          <div id="notes-list" class="items-list">
+            <p class="list-empty" id="notes-empty">No notes yet. Write one above.</p>
+          </div>
+        </div>
+
+      </main>
+    </div>
+
+    <!-- FIXED INPUT AREA -->
+    <div class="compose-bar" id="compose-bar">
+      <div class="compose-inner">
+        <textarea
+          id="message-input"
+          class="compose-input"
+          placeholder="Start writing a draft..."
+          rows="1"
+          maxlength="2000"
+        ></textarea>
+        <button id="send-btn" class="btn-save">Save Draft</button>
+      </div>
+    </div>
+
+  </div><!-- /app -->
+
+  <!-- Sidebar Overlay for mobile -->
+  <div class="sidebar-overlay hidden" id="sidebar-overlay"></div>
+
+  <!-- Supabase CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="app.js"></script>
+</body>
+</html>
