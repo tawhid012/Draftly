@@ -9,6 +9,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Lora:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
+  <!-- Leaflet CSS must be in <head> for correct tile rendering -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
 <body>
 
@@ -102,9 +104,9 @@
             <span class="nav-icon">◈</span>
             <span>Quick Notes</span>
           </a>
-          <a href="#" class="nav-item disabled" id="nav-archive">
-            <span class="nav-icon">⊞</span>
-            <span>Archive</span>
+          <a href="#" class="nav-item" id="nav-archive">
+            <span class="nav-icon">&#8984;</span>
+            <span>Live Location</span>
           </a>
         </nav>
 
@@ -203,6 +205,10 @@
             </div>
             <div class="drafts-meta">
               <span id="typing-indicator" class="typing-indicator hidden"></span>
+              <div class="call-buttons">
+                <button id="btn-voice-call" class="call-btn" title="Voice call">&#9990;</button>
+                <button id="btn-video-call" class="call-btn" title="Video call">&#9646;</button>
+              </div>
             </div>
           </div>
 
@@ -249,12 +255,58 @@
           </div>
         </div>
 
+        <!-- ── LIVE LOCATION VIEW ── -->
+        <div id="archive-view" class="view-section hidden">
+          <div class="section-header">
+            <h2 class="section-title">Live Location</h2>
+            <p class="section-subtitle">Share and see each other’s real-time location</p>
+          </div>
+
+          <!-- Location status bar -->
+          <div class="location-status-bar">
+            <div class="loc-status-item" id="my-loc-status">
+              <span class="loc-dot" id="my-loc-dot"></span>
+              <span class="loc-label">Your location: <strong id="my-loc-text">Not sharing</strong></span>
+            </div>
+            <div class="loc-status-item" id="other-loc-status">
+              <span class="loc-dot" id="other-loc-dot"></span>
+              <span class="loc-label">Collaborator: <strong id="other-loc-text">Not sharing</strong></span>
+            </div>
+          </div>
+
+          <!-- Share controls -->
+          <div class="location-controls">
+            <button id="loc-center-btn" class="loc-icon-btn" title="Center map">&#8982;</button>
+          </div>
+
+          <!-- Permission denied help banner -->
+          <div id="loc-permission-denied" class="loc-permission-denied hidden">
+            <div class="loc-perm-icon">&#128205;</div>
+            <div class="loc-perm-body">
+              <p class="loc-perm-title">Location access blocked</p>
+              <p class="loc-perm-msg" id="loc-perm-msg">Your browser has blocked location access for this site.</p>
+              <div class="loc-perm-steps" id="loc-perm-steps"></div>
+              <button id="loc-retry-btn" class="btn-add loc-btn" style="margin-top:12px">&#8635; Try Again</button>
+            </div>
+          </div>
+
+          <!-- Map container -->
+          <div id="location-map" class="location-map"></div>
+
+          <!-- Coordinates info -->
+          <div class="loc-coords" id="loc-coords-info"></div>
+        </div>
+
       </main>
     </div>
 
     <!-- FIXED INPUT AREA -->
     <div class="compose-bar" id="compose-bar">
       <div class="compose-inner">
+        <!-- Hidden file input for images -->
+        <input type="file" id="image-file-input" accept="image/*" style="display:none" />
+        <button id="attach-btn" class="compose-action-btn" title="Attach image">&#128206;</button>
+        <button id="record-btn" class="compose-action-btn" title="Voice message">&#127897;</button>
         <textarea
           id="message-input"
           class="compose-input"
@@ -264,6 +316,12 @@
         ></textarea>
         <button id="send-btn" class="btn-save">Save Draft</button>
       </div>
+      <!-- Recording indicator -->
+      <div id="recording-bar" class="recording-bar hidden">
+        <span class="rec-dot"></span>
+        <span id="rec-timer">0:00</span>
+        <span class="rec-label">Recording voice note — click mic to stop</span>
+      </div>
     </div>
 
   </div><!-- /app -->
@@ -271,6 +329,54 @@
   <!-- Sidebar Overlay for mobile -->
   <div class="sidebar-overlay hidden" id="sidebar-overlay"></div>
 
+  <!-- ── INCOMING CALL BANNER ── -->
+  <div id="incoming-call-banner" class="incoming-call-banner hidden">
+    <div class="incoming-call-inner">
+      <div class="incoming-call-info">
+        <span id="incoming-call-icon" class="incoming-call-icon">&#9990;</span>
+        <div>
+          <p class="incoming-call-name" id="incoming-call-name">Incoming call</p>
+          <p class="incoming-call-type" id="incoming-call-type">Voice call</p>
+        </div>
+      </div>
+      <div class="incoming-call-actions">
+        <button id="call-accept-btn" class="call-action accept">Accept</button>
+        <button id="call-decline-btn" class="call-action decline">Decline</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ACTIVE CALL OVERLAY ── -->
+  <div id="call-overlay" class="call-overlay hidden">
+    <div class="call-overlay-inner">
+      <!-- Remote video (video calls) -->
+      <video id="remote-video" class="call-remote-video" autoplay playsinline></video>
+      <!-- Local video preview (video calls) -->
+      <video id="local-video" class="call-local-video" autoplay playsinline muted></video>
+
+      <div class="call-overlay-info">
+        <p class="call-peer-name" id="call-peer-name"></p>
+        <p class="call-status" id="call-status">Connecting...</p>
+        <p class="call-duration" id="call-duration">0:00</p>
+      </div>
+
+      <div class="call-overlay-controls">
+        <button id="call-mute-btn" class="call-ctrl-btn" title="Mute">&#128263;</button>
+        <button id="call-cam-btn" class="call-ctrl-btn hidden" title="Toggle camera">&#128249;</button>
+        <button id="call-end-btn" class="call-ctrl-btn call-end" title="End call">&#9990;</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── IMAGE LIGHTBOX ── -->
+  <div id="img-lightbox" class="img-lightbox hidden">
+    <div class="img-lightbox-bg" id="img-lightbox-bg"></div>
+    <img id="img-lightbox-img" class="img-lightbox-img" src="" alt="" />
+    <button id="img-lightbox-close" class="img-lightbox-close">✕</button>
+  </div>
+
+  <!-- Leaflet.js -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <!-- Supabase CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="app.js"></script>

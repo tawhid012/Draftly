@@ -113,6 +113,51 @@ const UI = {
   noteAddBtn:       $('note-add-btn'),
   notesList:        $('notes-list'),
   notesEmpty:       $('notes-empty'),
+
+  // Media — attachments & voice
+  attachBtn:        $('attach-btn'),
+  imageFileInput:   $('image-file-input'),
+  recordBtn:        $('record-btn'),
+  recordingBar:     $('recording-bar'),
+  recTimer:         $('rec-timer'),
+
+  // Call UI
+  btnVoiceCall:     $('btn-voice-call'),
+  btnVideoCall:     $('btn-video-call'),
+  incomingBanner:   $('incoming-call-banner'),
+  incomingName:     $('incoming-call-name'),
+  incomingType:     $('incoming-call-type'),
+  incomingIcon:     $('incoming-call-icon'),
+  callAcceptBtn:    $('call-accept-btn'),
+  callDeclineBtn:   $('call-decline-btn'),
+  callOverlay:      $('call-overlay'),
+  remoteVideo:      $('remote-video'),
+  localVideo:       $('local-video'),
+  callPeerName:     $('call-peer-name'),
+  callStatus:       $('call-status'),
+  callDuration:     $('call-duration'),
+  callMuteBtn:      $('call-mute-btn'),
+  callCamBtn:       $('call-cam-btn'),
+  callEndBtn:       $('call-end-btn'),
+
+  // Lightbox
+  imgLightbox:      $('img-lightbox'),
+  imgLightboxImg:   $('img-lightbox-img'),
+  imgLightboxClose: $('img-lightbox-close'),
+  imgLightboxBg:    $('img-lightbox-bg'),
+
+  // Archive / Live Location view
+  archiveView:      $('archive-view'),
+  locCenterBtn:     $('loc-center-btn'),
+  myLocDot:         $('my-loc-dot'),
+  myLocText:        $('my-loc-text'),
+  otherLocDot:      $('other-loc-dot'),
+  otherLocText:     $('other-loc-text'),
+  locCoordsInfo:    $('loc-coords-info'),
+  locPermDenied:    $('loc-permission-denied'),
+  locPermMsg:       $('loc-perm-msg'),
+  locPermSteps:     $('loc-perm-steps'),
+  locRetryBtn:      $('loc-retry-btn'),
 };
 
 // ─────────────────────────────────────────────
@@ -244,6 +289,18 @@ async function initApp(user) {
 
   // Init study timer
   initTimer();
+
+  // Subscribe to call signaling
+  subscribeCallSignaling();
+
+  // Subscribe to location channel (receive location even if not on map tab)
+  subscribeLocationChannel();
+
+  // Automatically start sharing location
+  startSharingLocation();
+
+  // Load offline location for collaborator
+  loadOfflineLocation();
 }
 
 // ─────────────────────────────────────────────
@@ -379,7 +436,6 @@ function subscribeRealtime() {
 function renderMessages() {
   const feed = UI.messagesFeed;
 
-  // Remove all draft entries (keep #feed-empty)
   feed.querySelectorAll('.draft-entry').forEach(el => el.remove());
 
   if (allMessages.length === 0) {
@@ -391,10 +447,10 @@ function renderMessages() {
   const myEmail = currentUser.email.toLowerCase();
 
   allMessages.forEach((msg, idx) => {
-    const isSelf   = msg.sender.toLowerCase() === myEmail;
-    const isLast   = idx === allMessages.length - 1;
-    const isLastFromOther = !isSelf && isLast;
-    const isLastFromSelf  = isSelf  && isLast;
+    const isSelf  = msg.sender.toLowerCase() === myEmail;
+    const isLast  = idx === allMessages.length - 1;
+    const isLastFromSelf = isSelf && isLast;
+    const msgType = msg.type || 'text';
 
     const entry = document.createElement('div');
     entry.className = `draft-entry ${isSelf ? 'self' : 'other'}`;
@@ -403,27 +459,56 @@ function renderMessages() {
     // Meta row
     const meta = document.createElement('div');
     meta.className = 'entry-meta';
-
     const sender = document.createElement('span');
     sender.className = 'entry-sender';
     sender.textContent = isSelf ? 'You' : formatEmail(msg.sender);
-
     const time = document.createElement('span');
     time.className = 'entry-time';
     time.textContent = formatTime(msg.created_at);
-
     meta.appendChild(sender);
     meta.appendChild(time);
-
-    // Body
-    const body = document.createElement('div');
-    body.className = 'entry-body';
-    body.textContent = msg.content;
-
     entry.appendChild(meta);
-    entry.appendChild(body);
 
-    // Seen indicator — only on last message from self if it was seen
+    // Body — different per type
+    if (msgType === 'image' && msg.file_url) {
+      const body = document.createElement('div');
+      body.className = 'entry-body';
+      body.style.padding = '8px';
+      const img = document.createElement('img');
+      img.className = 'entry-image';
+      img.src = msg.file_url;
+      img.alt = msg.file_name || 'Image';
+      img.loading = 'lazy';
+      img.addEventListener('click', () => openLightbox(msg.file_url));
+      body.appendChild(img);
+      if (msg.content && msg.content !== msg.file_name) {
+        const cap = document.createElement('p');
+        cap.style.cssText = 'font-size:0.82rem;color:var(--text-secondary);margin-top:6px;';
+        cap.textContent = msg.content;
+        body.appendChild(cap);
+      }
+      entry.appendChild(body);
+    } else if (msgType === 'voice' && msg.file_url) {
+      const body = document.createElement('div');
+      body.className = 'entry-body entry-audio';
+      const audio = document.createElement('audio');
+      audio.controls = true;
+      audio.src = msg.file_url;
+      audio.preload = 'none';
+      const label = document.createElement('span');
+      label.className = 'audio-label';
+      label.textContent = 'Voice note';
+      body.appendChild(audio);
+      body.appendChild(label);
+      entry.appendChild(body);
+    } else {
+      const body = document.createElement('div');
+      body.className = 'entry-body';
+      body.textContent = msg.content || '';
+      entry.appendChild(body);
+    }
+
+    // Seen indicator
     if (isLastFromSelf && msg.seen) {
       const seen = document.createElement('span');
       seen.className = 'entry-seen';
@@ -560,9 +645,10 @@ document.querySelectorAll('.nav-item:not(.disabled)').forEach(item => {
     e.preventDefault();
     const id = item.id;
     if (id === 'nav-dashboard') navigateTo('dashboard');
-    else if (id === 'nav-drafts')    navigateTo('drafts');
-    else if (id === 'nav-tasks')     navigateTo('tasks');
-    else if (id === 'nav-ideas')     navigateTo('notes');
+    else if (id === 'nav-drafts')   navigateTo('drafts');
+    else if (id === 'nav-tasks')    navigateTo('tasks');
+    else if (id === 'nav-ideas')    navigateTo('notes');
+    else if (id === 'nav-archive')  navigateTo('archive');
     closeSidebar();
   });
 });
@@ -649,22 +735,26 @@ function navigateTo(view) {
   UI.draftsView.classList.toggle('hidden',    view !== 'drafts');
   UI.tasksView.classList.toggle('hidden',     view !== 'tasks');
   UI.notesView.classList.toggle('hidden',     view !== 'notes');
+  UI.archiveView.classList.toggle('hidden',   view !== 'archive');
 
   // Show/hide compose bar
   UI.app.classList.toggle('no-compose', view !== 'drafts');
 
   // Sidebar active state
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-  const navMap = { dashboard: 'nav-dashboard', drafts: 'nav-drafts', tasks: 'nav-tasks', notes: 'nav-ideas' };
+  const navMap = { dashboard: 'nav-dashboard', drafts: 'nav-drafts', tasks: 'nav-tasks', notes: 'nav-ideas', archive: 'nav-archive' };
   const activeNav = $(navMap[view]);
   if (activeNav) activeNav.classList.add('active');
 
   // Nav title
-  const titles = { dashboard: 'Dashboard', drafts: 'My Drafts', tasks: 'Tasks', notes: 'Quick Notes' };
+  const titles = { dashboard: 'Dashboard', drafts: 'My Drafts', tasks: 'Tasks', notes: 'Quick Notes', archive: 'Live Location' };
   UI.navTitleEl.textContent = titles[view] || 'Draftly';
 
   // Refresh dashboard stats when switching to it
   if (view === 'dashboard') updateDashboardStats();
+
+  // Init map when first navigating to archive
+  if (view === 'archive') initLocationMap();
 }
 
 // ─────────────────────────────────────────────
@@ -1023,7 +1113,822 @@ function startStatusPoll() {
   startStatusPollEnhanced();
 }
 
+// ─────────────────────────────────────────────
+// 28. IMAGE ATTACHMENTS
+// ─────────────────────────────────────────────
+
+UI.attachBtn.addEventListener('click', () => UI.imageFileInput.click());
+
+UI.imageFileInput.addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = '';
+
+  const MAX = 10 * 1024 * 1024; // 10 MB
+  if (file.size > MAX) { showToast('Image too large (max 10 MB).', 'error'); return; }
+
+  const ext  = file.name.split('.').pop();
+  const path = `images/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+
+  // Visual uploading state
+  UI.attachBtn.classList.add('uploading');
+  UI.attachBtn.title = 'Uploading...';
+
+  const { error: uploadErr } = await sb.storage
+    .from('draftly-media')
+    .upload(path, file, { contentType: file.type, upsert: false });
+
+  if (uploadErr) {
+    showToast(`Upload failed: ${uploadErr.message}`, 'error');
+    UI.attachBtn.classList.remove('uploading');
+    UI.attachBtn.title = 'Attach image';
+    return;
+  }
+
+  const { data: { publicUrl } } = sb.storage
+    .from('draftly-media')
+    .getPublicUrl(path);
+
+  const { error: msgErr } = await sb.from('messages').insert({
+    content:   file.name,
+    sender:    currentUser.email.toLowerCase(),
+    seen:      false,
+    type:      'image',
+    file_url:  publicUrl,
+    file_name: file.name,
+  });
+
+  if (msgErr) {
+    showToast(`Could not save image: ${msgErr.message}`, 'error');
+  } else {
+    showToast('Image sent ✓', 'success');
+  }
+
+  UI.attachBtn.classList.remove('uploading');
+  UI.attachBtn.title = 'Attach image';
+});
+
+// Image lightbox
+function openLightbox(src) {
+  UI.imgLightboxImg.src = src;
+  UI.imgLightbox.classList.remove('hidden');
+}
+
+UI.imgLightboxClose.addEventListener('click', () => UI.imgLightbox.classList.add('hidden'));
+UI.imgLightboxBg.addEventListener('click',    () => UI.imgLightbox.classList.add('hidden'));
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') UI.imgLightbox.classList.add('hidden');
+});
+
+// ─────────────────────────────────────────────
+// 29. VOICE MESSAGES
+// ─────────────────────────────────────────────
+
+let mediaRecorder  = null;
+let recChunks      = [];
+let recSeconds     = 0;
+let recInterval    = null;
+let isRecording    = false;
+const MAX_REC_SECS = 120;
+
+UI.recordBtn.addEventListener('click', () => {
+  if (isRecording) stopRecording();
+  else              startRecording();
+});
+
+async function startRecording() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recChunks  = [];
+    recSeconds = 0;
+    isRecording = true;
+
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      uploadVoiceMessage(new Blob(recChunks, { type: 'audio/webm' }));
+    };
+    mediaRecorder.start(250);
+
+    UI.recordBtn.classList.add('recording');
+    UI.recordingBar.classList.remove('hidden');
+
+    recInterval = setInterval(() => {
+      recSeconds++;
+      const m = Math.floor(recSeconds / 60);
+      const s = recSeconds % 60;
+      UI.recTimer.textContent = `${m}:${String(s).padStart(2,'0')}`;
+      if (recSeconds >= MAX_REC_SECS) stopRecording();
+    }, 1000);
+  } catch (err) {
+    console.error('Mic access:', err);
+    alert('Microphone access denied.');
+  }
+}
+
+function stopRecording() {
+  if (!isRecording || !mediaRecorder) return;
+  isRecording = false;
+  clearInterval(recInterval);
+  mediaRecorder.stop();
+  UI.recordBtn.classList.remove('recording');
+  UI.recordingBar.classList.add('hidden');
+  UI.recTimer.textContent = '0:00';
+}
+
+async function uploadVoiceMessage(blob) {
+  const path = `voice/${Date.now()}_${Math.random().toString(36).slice(2)}.webm`;
+
+  const { error: uploadErr } = await sb.storage
+    .from('draftly-media')
+    .upload(path, blob, { contentType: 'audio/webm', upsert: false });
+
+  if (uploadErr) { console.error('Voice upload:', uploadErr.message); return; }
+
+  const { data: { publicUrl } } = sb.storage
+    .from('draftly-media')
+    .getPublicUrl(path);
+
+  const { error: msgErr } = await sb.from('messages').insert({
+    content:   'Voice note',
+    sender:    currentUser.email.toLowerCase(),
+    seen:      false,
+    type:      'voice',
+    file_url:  publicUrl,
+    file_name: path,
+  });
+
+  if (msgErr) console.error('Voice message:', msgErr.message);
+}
+
+// ─────────────────────────────────────────────
+// 30. WEBRTC CALLING — SIGNALING
+// ─────────────────────────────────────────────
+
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+];
+
+let callChannel      = null;  // Supabase broadcast channel
+let peerConn         = null;  // RTCPeerConnection
+let localStream      = null;  // local media stream
+let callType         = null;  // 'voice' | 'video'
+let callRole         = null;  // 'caller' | 'callee'
+let pendingOffer     = null;  // stored offer for accept
+let callDurInterval  = null;
+let callDurSecs      = 0;
+let callMuted        = false;
+
+function subscribeCallSignaling() {
+  if (callChannel) sb.removeChannel(callChannel);
+
+  callChannel = sb
+    .channel('draftly-call', { config: { broadcast: { self: false } } })
+    .on('broadcast', { event: 'call-offer' }, async ({ payload }) => {
+      if (!payload || payload.to !== currentUser.email.toLowerCase()) return;
+      pendingOffer = payload;
+      showIncomingCall(payload);
+    })
+    .on('broadcast', { event: 'call-answer' }, async ({ payload }) => {
+      if (!peerConn || callRole !== 'caller') return;
+      try {
+        await peerConn.setRemoteDescription(new RTCSessionDescription(payload.answer));
+        $('call-status').textContent = 'Connected';
+        startCallDuration();
+      } catch(e) { console.error('setRemote answer:', e); }
+    })
+    .on('broadcast', { event: 'ice-candidate' }, async ({ payload }) => {
+      if (!peerConn || payload.to !== currentUser.email.toLowerCase()) return;
+      try {
+        await peerConn.addIceCandidate(new RTCIceCandidate(payload.candidate));
+      } catch(e) { /* ignore late ICE */ }
+    })
+    .on('broadcast', { event: 'call-end' }, () => {
+      if (peerConn) endCall(false);
+    })
+    .on('broadcast', { event: 'call-reject' }, () => {
+      if (callRole === 'caller') {
+        endCall(false);
+        UI.callStatus.textContent = 'Call declined';
+      }
+    })
+    .subscribe();
+}
+
+async function broadcastSignal(event, payload) {
+  await callChannel.send({ type: 'broadcast', event, payload });
+}
+
+// ─────────────────────────────────────────────
+// 31. WEBRTC CALLING — INITIATE
+// ─────────────────────────────────────────────
+
+UI.btnVoiceCall.addEventListener('click', () => initiateCall('voice'));
+UI.btnVideoCall.addEventListener('click', () => initiateCall('video'));
+
+async function initiateCall(type) {
+  if (peerConn) return; // already in a call
+  callType = type;
+  callRole = 'caller';
+
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia(
+      type === 'video' ? { audio: true, video: true } : { audio: true }
+    );
+  } catch(e) {
+    alert(`Could not access ${type === 'video' ? 'camera/microphone' : 'microphone'}.`);
+    return;
+  }
+
+  showCallOverlay('Calling...', type);
+  setupPeerConnection();
+
+  localStream.getTracks().forEach(t => peerConn.addTrack(t, localStream));
+
+  if (type === 'video') {
+    UI.localVideo.srcObject = localStream;
+    UI.localVideo.classList.add('visible');
+    UI.callCamBtn.classList.remove('hidden');
+  }
+
+  const offer = await peerConn.createOffer();
+  await peerConn.setLocalDescription(offer);
+
+  await broadcastSignal('call-offer', {
+    from:  currentUser.email.toLowerCase(),
+    to:    otherEmail,
+    type,
+    offer: peerConn.localDescription,
+  });
+}
+
+// ─────────────────────────────────────────────
+// 32. WEBRTC CALLING — INCOMING
+// ─────────────────────────────────────────────
+
+function showIncomingCall(payload) {
+  UI.incomingName.textContent = formatEmail(payload.from) + ' is calling';
+  UI.incomingType.textContent = payload.type === 'video' ? 'Video call' : 'Voice call';
+  UI.incomingIcon.textContent = payload.type === 'video' ? '\u{1F4F9}' : '\u260E';
+  UI.incomingBanner.classList.remove('hidden');
+}
+
+UI.callAcceptBtn.addEventListener('click', async () => {
+  if (!pendingOffer) return;
+  UI.incomingBanner.classList.add('hidden');
+
+  callType = pendingOffer.type;
+  callRole = 'callee';
+
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia(
+      callType === 'video' ? { audio: true, video: true } : { audio: true }
+    );
+  } catch(e) {
+    alert('Could not access microphone/camera.');
+    return;
+  }
+
+  showCallOverlay('Connecting...', callType);
+  setupPeerConnection();
+  localStream.getTracks().forEach(t => peerConn.addTrack(t, localStream));
+
+  if (callType === 'video') {
+    UI.localVideo.srcObject = localStream;
+    UI.localVideo.classList.add('visible');
+    UI.callCamBtn.classList.remove('hidden');
+  }
+
+  await peerConn.setRemoteDescription(new RTCSessionDescription(pendingOffer.offer));
+  const answer = await peerConn.createAnswer();
+  await peerConn.setLocalDescription(answer);
+
+  await broadcastSignal('call-answer', {
+    from:   currentUser.email.toLowerCase(),
+    to:     pendingOffer.from,
+    answer: peerConn.localDescription,
+  });
+
+  UI.callStatus.textContent = 'Connected';
+  startCallDuration();
+  pendingOffer = null;
+});
+
+UI.callDeclineBtn.addEventListener('click', () => {
+  UI.incomingBanner.classList.add('hidden');
+  pendingOffer = null;
+  broadcastSignal('call-reject', { from: currentUser.email.toLowerCase() });
+});
+
+// ─────────────────────────────────────────────
+// 33. WEBRTC — PEER CONNECTION SETUP
+// ─────────────────────────────────────────────
+
+function setupPeerConnection() {
+  peerConn = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+
+  peerConn.onicecandidate = async e => {
+    if (e.candidate) {
+      await broadcastSignal('ice-candidate', {
+        to:        otherEmail,
+        candidate: e.candidate,
+      });
+    }
+  };
+
+  peerConn.ontrack = e => {
+    if (UI.remoteVideo.srcObject !== e.streams[0]) {
+      UI.remoteVideo.srcObject = e.streams[0];
+      if (callType === 'video') {
+        UI.remoteVideo.classList.add('active');
+      }
+    }
+  };
+
+  peerConn.onconnectionstatechange = () => {
+    const state = peerConn.connectionState;
+    if (state === 'connected') {
+      UI.callStatus.textContent = 'Connected';
+      startCallDuration();
+    } else if (state === 'failed' || state === 'disconnected') {
+      UI.callStatus.textContent = 'Connection lost';
+      setTimeout(() => endCall(true), 2000);
+    }
+  };
+}
+
+// ─────────────────────────────────────────────
+// 34. CALL OVERLAY UI & CONTROLS
+// ─────────────────────────────────────────────
+
+function showCallOverlay(statusText, type) {
+  UI.callPeerName.textContent  = formatEmail(otherEmail || '');
+  UI.callStatus.textContent    = statusText;
+  UI.callDuration.textContent  = '0:00';
+  UI.callOverlay.classList.remove('hidden');
+  callDurSecs = 0;
+}
+
+function startCallDuration() {
+  if (callDurInterval) clearInterval(callDurInterval);
+  callDurInterval = setInterval(() => {
+    callDurSecs++;
+    const m = Math.floor(callDurSecs / 60);
+    const s = callDurSecs % 60;
+    UI.callDuration.textContent = `${m}:${String(s).padStart(2,'0')}`;
+  }, 1000);
+}
+
+// Mute toggle
+UI.callMuteBtn.addEventListener('click', () => {
+  if (!localStream) return;
+  callMuted = !callMuted;
+  localStream.getAudioTracks().forEach(t => { t.enabled = !callMuted; });
+  UI.callMuteBtn.classList.toggle('muted', callMuted);
+  UI.callMuteBtn.textContent = callMuted ? '\u{1F507}' : '\u{1F508}';
+});
+
+// Camera toggle (video only)
+UI.callCamBtn.addEventListener('click', () => {
+  if (!localStream) return;
+  const vid = localStream.getVideoTracks()[0];
+  if (vid) vid.enabled = !vid.enabled;
+});
+
+// End call button
+UI.callEndBtn.addEventListener('click', () => endCall(true));
+
+function endCall(broadcast) {
+  if (broadcast) broadcastSignal('call-end', { from: currentUser.email.toLowerCase() });
+
+  if (peerConn)     { peerConn.close();     peerConn = null; }
+  if (localStream)  { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+  if (callDurInterval) { clearInterval(callDurInterval); callDurInterval = null; }
+
+  UI.remoteVideo.srcObject = null;
+  UI.localVideo.srcObject  = null;
+  UI.remoteVideo.classList.remove('active');
+  UI.localVideo.classList.remove('visible');
+  UI.callCamBtn.classList.add('hidden');
+  UI.callMuteBtn.classList.remove('muted');
+  UI.callMuteBtn.textContent = '\u{1F508}';
+  UI.callOverlay.classList.add('hidden');
+  UI.incomingBanner.classList.add('hidden');
+
+  callType = null; callRole = null; pendingOffer = null; callMuted = false; callDurSecs = 0;
+}
+
+// ─────────────────────────────────────────────
+// 35. BOOT
+// ─────────────────────────────────────────────
+
 (async () => {
   showScreen(UI.loginScreen);
   await restoreSession();
 })();
+
+// ─────────────────────────────────────────────
+// 36. TOAST NOTIFICATIONS
+// ─────────────────────────────────────────────
+
+let toastContainer = null;
+
+function showToast(msg, type = 'info', duration = 3500) {
+  if (!toastContainer) {
+    toastContainer = document.createElement('div');
+    toastContainer.className = 'toast-container';
+    document.body.appendChild(toastContainer);
+  }
+  const t = document.createElement('div');
+  t.className = `toast${type === 'error' ? ' toast-error' : type === 'success' ? ' toast-success' : ''}`;
+  t.textContent = msg;
+  toastContainer.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; t.style.transition = 'opacity 0.3s'; setTimeout(() => t.remove(), 310); }, duration);
+}
+
+// ─────────────────────────────────────────────
+// 37. LIVE LOCATION — LEAFLET + SUPABASE REALTIME
+// ─────────────────────────────────────────────
+
+let locationMap       = null;   // Leaflet map instance
+let mapInitialized    = false;
+let myMarker          = null;   // Leaflet marker for self
+let otherMarker       = null;   // Leaflet marker for other user
+let locationChannel   = null;   // Supabase realtime broadcast channel
+let geoWatchId        = null;   // navigator.geolocation watchId
+let isSharingLocation = false;
+let lastMyPos         = null;
+let lastOtherPos      = null;
+
+let lastLocationDbUpdate = 0;
+const LOC_DB_UPDATE_INTERVAL = 30000; // Save to DB every 30 seconds max
+
+// Custom minimal marker icon factory
+function makeMarkerIcon(color, label) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36">
+    <path d="M14 0C6.27 0 0 6.27 0 14c0 10.5 14 22 14 22s14-11.5 14-22C28 6.27 21.73 0 14 0z" fill="${color}"/>
+    <circle cx="14" cy="14" r="6" fill="white" opacity="0.9"/>
+    <text x="14" y="18" text-anchor="middle" font-size="8" font-family="Inter,sans-serif" font-weight="600" fill="${color}">${label}</text>
+  </svg>`;
+  return L.divIcon({
+    html: svg,
+    className: '',
+    iconSize:   [28, 36],
+    iconAnchor: [14, 36],
+    popupAnchor: [0, -38],
+  });
+}
+
+let _locBtnsWired = false;
+
+function initLocationMap() {
+  // Wire buttons once, regardless of map init state
+  if (!_locBtnsWired) {
+    _locBtnsWired = true;
+    UI.locCenterBtn.addEventListener('click', centerMap);
+    UI.locRetryBtn.addEventListener('click', () => {
+      UI.locPermDenied.classList.add('hidden');
+      startSharingLocation();
+    });
+  }
+
+  if (mapInitialized) {
+    // Map already exists — just fix its size after the hidden div becomes visible
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        if (locationMap) {
+          locationMap.invalidateSize({ animate: false });
+          // Re-apply saved positions
+          if (lastMyPos)    updateMyMarker(lastMyPos.lat, lastMyPos.lng, lastMyPos.accuracy);
+          if (lastOtherPos) updateOtherMarker(lastOtherPos.lat, lastOtherPos.lng, lastOtherPos.accuracy || 0);
+        }
+      }, 150);
+    });
+    return;
+  }
+  mapInitialized = true;
+
+  // Defer map creation one frame so the container has layout
+  requestAnimationFrame(() => {
+    // Default center: India
+    locationMap = L.map('location-map', {
+      center: [20.5937, 78.9629],
+      zoom:   5,
+      zoomControl: true,
+      attributionControl: true,
+    });
+
+    // Google Maps tile layer
+    L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+      attribution: '&copy; Google Maps',
+      maxZoom: 20,
+    }).addTo(locationMap);
+
+    // Force size recalculation after tiles load
+    setTimeout(() => locationMap.invalidateSize({ animate: false }), 200);
+
+    // If we already have positions (received before map was open), apply them now
+    if (lastMyPos)    updateMyMarker(lastMyPos.lat, lastMyPos.lng, lastMyPos.accuracy);
+    if (lastOtherPos) updateOtherMarker(lastOtherPos.lat, lastOtherPos.lng, lastOtherPos.accuracy || 0);
+  });
+}
+
+function subscribeLocationChannel() {
+  if (locationChannel) sb.removeChannel(locationChannel);
+
+  locationChannel = sb
+    .channel('draftly-location', { config: { broadcast: { self: false } } })
+    .on('broadcast', { event: 'location-update' }, ({ payload }) => {
+      if (!payload || payload.from !== otherEmail) return;
+      // Always save last known position
+      lastOtherPos = { lat: payload.lat, lng: payload.lng, accuracy: payload.accuracy, live: true };
+      // Update marker if map is ready
+      if (locationMap) {
+        updateOtherMarker(payload.lat, payload.lng, payload.accuracy);
+      } else {
+        // Map not open yet — update status bar text so user knows
+        UI.otherLocDot.className = 'loc-dot active';
+        UI.otherLocText.textContent = `${payload.lat.toFixed(5)}, ${payload.lng.toFixed(5)}`;
+      }
+    })
+    .on('broadcast', { event: 'location-stop' }, ({ payload }) => {
+      if (!payload || payload.from !== otherEmail) return;
+      lastOtherPos = null;
+      if (locationMap) clearOtherMarker();
+      else {
+        UI.otherLocDot.className = 'loc-dot inactive';
+        UI.otherLocText.textContent = 'Stopped sharing';
+      }
+    })
+    .subscribe();
+}
+
+async function broadcastLocation(lat, lng, accuracy) {
+  if (!locationChannel) return;
+  await locationChannel.send({
+    type: 'broadcast',
+    event: 'location-update',
+    payload: { from: currentUser.email.toLowerCase(), lat, lng, accuracy },
+  });
+}
+
+async function broadcastLocationStop() {
+  if (!locationChannel) return;
+  await locationChannel.send({
+    type: 'broadcast',
+    event: 'location-stop',
+    payload: { from: currentUser.email.toLowerCase() },
+  });
+}
+
+async function saveLocationToDB(lat, lng, accuracy) {
+  const now = Date.now();
+  if (now - lastLocationDbUpdate < LOC_DB_UPDATE_INTERVAL) return;
+
+  lastLocationDbUpdate = now;
+  const { error } = await sb.from('users').update({
+    last_lat: lat,
+    last_lng: lng,
+    last_accuracy: accuracy,
+    last_location_time: new Date().toISOString()
+  }).eq('email', currentUser.email.toLowerCase());
+
+  if (error) {
+    console.warn('saveLocationToDB error:', error.message);
+  }
+}
+
+async function loadOfflineLocation() {
+  if (!otherEmail) return;
+
+  const { data, error } = await sb.from('users')
+    .select('last_lat, last_lng, last_accuracy, last_location_time')
+    .eq('email', otherEmail)
+    .maybeSingle();
+
+  if (error || !data) return;
+
+  if (data.last_lat && data.last_lng) {
+    // If we haven't received a live broadcast yet, use the offline DB location
+    if (!lastOtherPos || !lastOtherPos.live) {
+      lastOtherPos = {
+        lat: data.last_lat,
+        lng: data.last_lng,
+        accuracy: data.last_accuracy,
+        time: data.last_location_time
+      };
+
+      if (locationMap) {
+        updateOtherMarker(lastOtherPos.lat, lastOtherPos.lng, lastOtherPos.accuracy);
+      } else {
+        UI.otherLocDot.className = 'loc-dot inactive';
+        UI.otherLocText.textContent = `Offline (Seen: ${formatTime(data.last_location_time)})`;
+      }
+    }
+  }
+}
+
+async function startSharingLocation() {
+  if (!navigator.geolocation) {
+    showLocationPermDenied('not-supported');
+    return;
+  }
+
+  // Proactively check permission state using Permissions API (if available)
+  if (navigator.permissions) {
+    try {
+      const status = await navigator.permissions.query({ name: 'geolocation' });
+      if (status.state === 'denied') {
+        showLocationPermDenied('denied');
+        return;
+      }
+      // 'prompt' or 'granted' — proceed and let the browser ask
+    } catch (_) { /* Permissions API not fully supported — proceed anyway */ }
+  }
+
+  isSharingLocation = true;
+  UI.locPermDenied.classList.add('hidden');
+  UI.myLocDot.className = 'loc-dot active';
+  UI.myLocText.textContent = 'Getting location...';
+
+  geoWatchId = navigator.geolocation.watchPosition(
+    pos => {
+      const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+      lastMyPos = { lat, lng, accuracy };
+      updateMyMarker(lat, lng, accuracy);
+      broadcastLocation(lat, lng, accuracy);
+      saveLocationToDB(lat, lng, accuracy);
+      UI.myLocText.textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      UI.locCoordsInfo.textContent = `Your accuracy: \u00b1${Math.round(accuracy)}m`;
+    },
+    err => {
+      stopSharingLocation();
+      if (err.code === 1 /* PERMISSION_DENIED */) {
+        showLocationPermDenied('denied');
+      } else if (err.code === 2 /* POSITION_UNAVAILABLE */) {
+        showToast('Location unavailable. Check your device\'s GPS/Location Services.', 'error', 5000);
+      } else if (err.code === 3 /* TIMEOUT */) {
+        showToast('Location request timed out. Try again in a moment.', 'error', 4000);
+      } else {
+        showToast(`Location error: ${err.message}`, 'error');
+      }
+    },
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+  );
+}
+
+function showLocationPermDenied(reason) {
+  // Reset share button state
+  UI.myLocDot.className = 'loc-dot inactive';
+  UI.myLocText.textContent = 'Blocked';
+
+  if (reason === 'not-supported') {
+    UI.locPermMsg.textContent = 'Your browser does not support location sharing.';
+    UI.locPermSteps.innerHTML = '<p>Please use a modern browser like Chrome, Firefox, or Safari.</p>';
+    UI.locPermDenied.classList.remove('hidden');
+    return;
+  }
+
+  // Detect browser
+  const ua = navigator.userAgent;
+  const isChrome  = /Chrome/.test(ua) && !/Edg/.test(ua);
+  const isFirefox = /Firefox/.test(ua);
+  const isSafari  = /Safari/.test(ua) && !/Chrome/.test(ua);
+  const isEdge    = /Edg/.test(ua);
+  const isMobile  = /Android|iPhone|iPad/.test(ua);
+
+  UI.locPermMsg.textContent = 'Location access was blocked. Follow the steps below to enable it, then click \u201cTry Again\u201d.';
+
+  let steps = '';
+  if (isMobile && /iPhone|iPad/.test(ua)) {
+    steps = `<ol>
+      <li>Open <code>Settings</code> on your iPhone/iPad</li>
+      <li>Scroll to <code>Safari</code> (or your browser app)</li>
+      <li>Tap <code>Location</code> \u2192 set to <code>Ask</code> or <code>Allow</code></li>
+      <li>Come back to Draftly and tap <strong>Try Again</strong></li>
+    </ol>`;
+  } else if (isMobile && /Android/.test(ua)) {
+    steps = `<ol>
+      <li>Tap the <code>lock icon</code> or <code>&#128274;</code> in your browser's address bar</li>
+      <li>Tap <code>Permissions</code> \u2192 <code>Location</code></li>
+      <li>Select <code>Allow</code></li>
+      <li>Tap <strong>Try Again</strong> below</li>
+    </ol>`;
+  } else if (isChrome) {
+    steps = `<ol>
+      <li>Click the <code>&#128274; lock</code> icon in the address bar (left of the URL)</li>
+      <li>Click <code>Location</code> \u2192 change to <code>Allow</code></li>
+      <li>Reload the page if prompted, then tap <strong>Try Again</strong></li>
+    </ol>`;
+  } else if (isFirefox) {
+    steps = `<ol>
+      <li>Click the <code>&#128274;</code> icon in the address bar</li>
+      <li>Click the <code>X</code> next to <em>Blocked Temporarily</em> or <em>Block</em></li>
+      <li>Select <code>Allow Location Access</code></li>
+      <li>Click <strong>Try Again</strong> below</li>
+    </ol>`;
+  } else if (isSafari) {
+    steps = `<ol>
+      <li>In the menu bar go to <code>Safari \u2192 Settings for This Website</code></li>
+      <li>Set <code>Location</code> to <code>Allow</code></li>
+      <li>Click <strong>Try Again</strong> below</li>
+    </ol>`;
+  } else if (isEdge) {
+    steps = `<ol>
+      <li>Click the <code>&#128274;</code> icon in the address bar</li>
+      <li>Click <code>Permissions for this site</code></li>
+      <li>Set <code>Location</code> to <code>Allow</code></li>
+      <li>Click <strong>Try Again</strong> below</li>
+    </ol>`;
+  } else {
+    steps = `<ol>
+      <li>Look for a <code>&#128274;</code> or location icon in your browser\'s address bar</li>
+      <li>Click it and set Location to <code>Allow</code></li>
+      <li>Click <strong>Try Again</strong> below</li>
+    </ol>`;
+  }
+
+  UI.locPermSteps.innerHTML = steps;
+  UI.locPermDenied.classList.remove('hidden');
+}
+
+function stopSharingLocation() {
+  if (geoWatchId !== null) {
+    navigator.geolocation.clearWatch(geoWatchId);
+    geoWatchId = null;
+  }
+  isSharingLocation = false;
+  UI.myLocDot.className = 'loc-dot inactive';
+  UI.myLocText.textContent = 'Not sharing';
+  UI.locCoordsInfo.textContent = '';
+
+  // Remove my marker
+  if (myMarker) { locationMap.removeLayer(myMarker); myMarker = null; }
+  lastMyPos = null;
+
+  // Tell other user we stopped
+  broadcastLocationStop();
+}
+
+function updateMyMarker(lat, lng, accuracy) {
+  if (!locationMap) return;
+  const icon = makeMarkerIcon('#3d3d3a', 'You');
+  if (!myMarker) {
+    myMarker = L.marker([lat, lng], { icon })
+      .addTo(locationMap)
+      .bindPopup(`<b>You</b><br>${lat.toFixed(5)}, ${lng.toFixed(5)}<br>±${Math.round(accuracy)}m`);
+    // Fly to first fix
+    locationMap.flyTo([lat, lng], 15, { duration: 1.5 });
+  } else {
+    myMarker.setLatLng([lat, lng]);
+    myMarker.setPopupContent(`<b>You</b><br>${lat.toFixed(5)}, ${lng.toFixed(5)}<br>±${Math.round(accuracy)}m`);
+  }
+}
+
+function updateOtherMarker(lat, lng, accuracy) {
+  if (!locationMap) return;
+  const name = formatEmail(otherEmail || 'them');
+  const icon = makeMarkerIcon('#4caf7d', name.slice(0, 3).toUpperCase());
+  UI.otherLocDot.className = 'loc-dot active';
+  UI.otherLocText.textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+  lastOtherPos = { lat, lng };
+
+  if (!otherMarker) {
+    otherMarker = L.marker([lat, lng], { icon })
+      .addTo(locationMap)
+      .bindPopup(`<b>${name}</b><br>${lat.toFixed(5)}, ${lng.toFixed(5)}<br>±${Math.round(accuracy)}m`);
+  } else {
+    otherMarker.setLatLng([lat, lng]);
+    otherMarker.setPopupContent(`<b>${name}</b><br>${lat.toFixed(5)}, ${lng.toFixed(5)}<br>±${Math.round(accuracy)}m`);
+  }
+
+  // If both markers exist, fit map to show both
+  if (myMarker && otherMarker) {
+    const group = L.featureGroup([myMarker, otherMarker]);
+    locationMap.fitBounds(group.getBounds().pad(0.3));
+  } else {
+    locationMap.flyTo([lat, lng], 14, { duration: 1.2 });
+  }
+}
+
+function clearOtherMarker() {
+  if (otherMarker) { locationMap.removeLayer(otherMarker); otherMarker = null; }
+  UI.otherLocDot.className = 'loc-dot inactive';
+  UI.otherLocText.textContent = 'Stopped sharing';
+  lastOtherPos = null;
+}
+
+function centerMap() {
+  if (!locationMap) return;
+  if (myMarker && otherMarker) {
+    locationMap.fitBounds(L.featureGroup([myMarker, otherMarker]).getBounds().pad(0.3));
+  } else if (myMarker) {
+    locationMap.flyTo(myMarker.getLatLng(), 15);
+  } else if (otherMarker) {
+    locationMap.flyTo(otherMarker.getLatLng(), 15);
+  } else {
+    showToast('No location to center on yet.', 'info');
+  }
+}
