@@ -36,7 +36,8 @@ let heartbeatTimer = null;  // interval for last_active pings
 let statusPollTimer = null; // interval for other user status
 let isTyping      = false;  // local typing state
 let realtimeChan  = null;   // Supabase realtime channel
-let allMessages   = [];     // cached messages array
+let allMessages      = [];     // cached messages array
+let editingMessageId = null;   // ID of message being edited
 
 // ─────────────────────────────────────────────
 // 4. DOM REFERENCES
@@ -73,6 +74,8 @@ const UI = {
 
   messageInput:     $('message-input'),
   sendBtn:          $('send-btn'),
+  editBanner:       $('edit-banner'),
+  cancelEditBtn:    $('cancel-edit-btn'),
 
   otherUserDot:     $('other-user-dot'),
   otherUserLabel:   $('other-user-label'),
@@ -325,11 +328,12 @@ async function updateLastActive(email) {
 async function loadMessages() {
   const { data, error } = await sb.from('messages')
     .select('*')
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: false })
+    .limit(50);
 
   if (error) { console.error('loadMessages:', error.message); return; }
 
-  allMessages = data || [];
+  allMessages = (data || []).reverse();
   renderMessages();
 }
 
@@ -413,6 +417,17 @@ function subscribeRealtime() {
       }
     })
 
+    // Message deletes
+    .on('postgres_changes', {
+      event: 'DELETE',
+      schema: 'public',
+      table: 'messages',
+    }, payload => {
+      const deletedId = payload.old.id;
+      allMessages = allMessages.filter(m => m.id !== deletedId);
+      renderMessages();
+    })
+
     // Typing status changes
     .on('postgres_changes', {
       event: '*',
@@ -469,6 +484,55 @@ function renderMessages() {
     meta.appendChild(time);
     entry.appendChild(meta);
 
+    const wrapper = document.createElement('div');
+    wrapper.className = 'entry-content-wrapper';
+
+    // Actions (only for self)
+    if (isSelf) {
+      const actions = document.createElement('div');
+      actions.className = 'entry-actions';
+
+      const menuBtn = document.createElement('button');
+      menuBtn.className = 'action-menu-btn';
+      menuBtn.innerHTML = '⋮';
+      
+      const dropdown = document.createElement('div');
+      dropdown.className = 'dropdown-menu hidden';
+
+      if (msgType === 'text') {
+        const editItem = document.createElement('button');
+        editItem.className = 'dropdown-item';
+        editItem.textContent = 'Edit message';
+        editItem.addEventListener('click', (e) => {
+          e.stopPropagation();
+          dropdown.classList.add('hidden');
+          editMessageInit(msg.id, msg.content);
+        });
+        dropdown.appendChild(editItem);
+      }
+
+      const delItem = document.createElement('button');
+      delItem.className = 'dropdown-item delete';
+      delItem.textContent = 'Delete message';
+      delItem.addEventListener('click', (e) => {
+        e.stopPropagation();
+        dropdown.classList.add('hidden');
+        deleteMessage(msg.id);
+      });
+      dropdown.appendChild(delItem);
+
+      menuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // Hide all other dropdowns
+        document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.add('hidden'));
+        dropdown.classList.remove('hidden');
+      });
+
+      actions.appendChild(menuBtn);
+      actions.appendChild(dropdown);
+      wrapper.appendChild(actions);
+    }
+
     // Body — different per type
     if (msgType === 'image' && msg.file_url) {
       const body = document.createElement('div');
@@ -487,7 +551,7 @@ function renderMessages() {
         cap.textContent = msg.content;
         body.appendChild(cap);
       }
-      entry.appendChild(body);
+      wrapper.appendChild(body);
     } else if (msgType === 'voice' && msg.file_url) {
       const body = document.createElement('div');
       body.className = 'entry-body entry-audio';
@@ -500,13 +564,15 @@ function renderMessages() {
       label.textContent = 'Voice note';
       body.appendChild(audio);
       body.appendChild(label);
-      entry.appendChild(body);
+      wrapper.appendChild(body);
     } else {
       const body = document.createElement('div');
       body.className = 'entry-body';
       body.textContent = msg.content || '';
-      entry.appendChild(body);
+      wrapper.appendChild(body);
     }
+
+    entry.appendChild(wrapper);
 
     // Seen indicator
     if (isLastFromSelf && msg.seen) {
@@ -610,16 +676,49 @@ async function handleSend() {
   if (!content.trim()) return;
 
   UI.sendBtn.disabled = true;
+
+  const isEditing = editingMessageId !== null;
+  const currentEditId = editingMessageId;
+
   UI.messageInput.value = '';
   autoResizeTextarea(UI.messageInput);
+  if (isEditing) cancelEditMessage();
 
   clearTimeout(typingTimer);
   await setTyping(false);
 
-  await sendMessage(content);
+  if (isEditing) {
+    const { error } = await sb.from('messages').update({ content: content.trim() }).eq('id', currentEditId);
+    if (error) showToast('Failed to edit message.', 'error');
+  } else {
+    await sendMessage(content);
+  }
+  
   UI.sendBtn.disabled = false;
   UI.messageInput.focus();
 }
+
+async function deleteMessage(id) {
+  const { error } = await sb.from('messages').delete().eq('id', id);
+  if (error) showToast('Failed to delete message.', 'error');
+}
+
+function editMessageInit(id, content) {
+  editingMessageId = id;
+  UI.messageInput.value = content;
+  autoResizeTextarea(UI.messageInput);
+  UI.messageInput.focus();
+  UI.editBanner.classList.remove('hidden');
+}
+
+function cancelEditMessage() {
+  editingMessageId = null;
+  UI.messageInput.value = '';
+  autoResizeTextarea(UI.messageInput);
+  UI.editBanner.classList.add('hidden');
+}
+
+if(UI.cancelEditBtn) UI.cancelEditBtn.addEventListener('click', cancelEditMessage);
 
 // ─────────────────────────────────────────────
 // 16. SIDEBAR TOGGLE (mobile)
@@ -814,9 +913,10 @@ let allTasks = [];
 async function loadTasks() {
   const { data, error } = await sb.from('tasks')
     .select('*')
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: false })
+    .limit(50);
   if (error) { console.warn('loadTasks:', error.message); return; }
-  allTasks = data || [];
+  allTasks = (data || []).reverse();
   renderTasks();
   updateDashboardStats();
 }
@@ -898,9 +998,10 @@ let allNotes = [];
 async function loadNotes() {
   const { data, error } = await sb.from('notes')
     .select('*')
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: false })
+    .limit(50);
   if (error) { console.warn('loadNotes:', error.message); return; }
-  allNotes = data || [];
+  allNotes = (data || []).reverse();
   renderNotes();
   updateDashboardStats();
 }
@@ -1280,6 +1381,7 @@ let pendingOffer     = null;  // stored offer for accept
 let callDurInterval  = null;
 let callDurSecs      = 0;
 let callMuted        = false;
+let pendingCandidates = [];
 
 function subscribeCallSignaling() {
   if (callChannel) sb.removeChannel(callChannel);
@@ -1295,6 +1397,8 @@ function subscribeCallSignaling() {
       if (!peerConn || callRole !== 'caller') return;
       try {
         await peerConn.setRemoteDescription(new RTCSessionDescription(payload.answer));
+        pendingCandidates.forEach(c => peerConn.addIceCandidate(new RTCIceCandidate(c)));
+        pendingCandidates = [];
         $('call-status').textContent = 'Connected';
         startCallDuration();
       } catch(e) { console.error('setRemote answer:', e); }
@@ -1302,7 +1406,11 @@ function subscribeCallSignaling() {
     .on('broadcast', { event: 'ice-candidate' }, async ({ payload }) => {
       if (!peerConn || payload.to !== currentUser.email.toLowerCase()) return;
       try {
-        await peerConn.addIceCandidate(new RTCIceCandidate(payload.candidate));
+        if (!peerConn.remoteDescription) {
+          pendingCandidates.push(payload.candidate);
+        } else {
+          await peerConn.addIceCandidate(new RTCIceCandidate(payload.candidate));
+        }
       } catch(e) { /* ignore late ICE */ }
     })
     .on('broadcast', { event: 'call-end' }, () => {
@@ -1402,6 +1510,8 @@ UI.callAcceptBtn.addEventListener('click', async () => {
   }
 
   await peerConn.setRemoteDescription(new RTCSessionDescription(pendingOffer.offer));
+  pendingCandidates.forEach(c => peerConn.addIceCandidate(new RTCIceCandidate(c)));
+  pendingCandidates = [];
   const answer = await peerConn.createAnswer();
   await peerConn.setLocalDescription(answer);
 
@@ -1517,7 +1627,7 @@ function endCall(broadcast) {
   UI.callOverlay.classList.add('hidden');
   UI.incomingBanner.classList.add('hidden');
 
-  callType = null; callRole = null; pendingOffer = null; callMuted = false; callDurSecs = 0;
+  callType = null; callRole = null; pendingOffer = null; callMuted = false; callDurSecs = 0; pendingCandidates = [];
 }
 
 // ─────────────────────────────────────────────
@@ -1932,3 +2042,13 @@ function centerMap() {
     showToast('No location to center on yet.', 'info');
   }
 }
+
+// ─────────────────────────────────────────────
+// 41. GLOBAL EVENT LISTENERS
+// ─────────────────────────────────────────────
+
+document.addEventListener('click', () => {
+  document.querySelectorAll('.dropdown-menu').forEach(m => {
+    if (!m.classList.contains('hidden')) m.classList.add('hidden');
+  });
+});

@@ -643,6 +643,89 @@ textarea { resize: none; }
   border-bottom-left-radius: 3px;
 }
 
+.entry-content-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.draft-entry.self .entry-content-wrapper {
+  flex-direction: row-reverse;
+}
+
+.entry-actions {
+  position: relative;
+  display: flex;
+  align-items: center;
+  opacity: 1; /* Always visible by default (mobile) */
+}
+
+@media (pointer: fine) {
+  /* On desktop (fine pointer), hide until hover */
+  .entry-actions { opacity: 0; transition: opacity 0.2s ease; }
+  .draft-entry:hover .entry-actions { opacity: 1; }
+}
+
+.action-menu-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  line-height: 1;
+}
+
+.action-menu-btn:hover {
+  background: rgba(0,0,0,0.05);
+  color: var(--text-primary);
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: 0;
+  right: 100%;
+  margin-right: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  z-index: 100;
+  min-width: 130px;
+}
+
+.dropdown-menu.hidden {
+  display: none;
+}
+
+.dropdown-item {
+  background: none;
+  border: none;
+  padding: 10px 16px;
+  text-align: left;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 0.2s;
+  width: 100%;
+}
+
+.dropdown-item:hover {
+  background: rgba(0,0,0,0.03);
+}
+
+.dropdown-item.delete {
+  color: #e53e3e;
+}
+.dropdown-item.delete:hover {
+  background: #fff5f5;
+}
+
 .entry-seen {
   font-size: 0.67rem;
   color: var(--text-muted);
@@ -1827,4 +1910,36 @@ textarea { resize: none; }
   padding: 1px 5px;
   font-size: 0.78rem;
   font-family: monospace;
+}
+
+/* ====================================
+   EDIT MESSAGE BANNER
+   ==================================== */
+
+.edit-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 16px;
+  background: rgba(0,0,0,0.02);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.cancel-edit-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.2s, background 0.2s;
+}
+
+.cancel-edit-btn:hover {
+  color: var(--text-primary);
+  background: rgba(0,0,0,0.05);
 }
