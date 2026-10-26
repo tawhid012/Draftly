@@ -8,8 +8,8 @@
 // 1. CONFIGURATION
 // ─────────────────────────────────────────────
 
-const SUPABASE_URL  = 'https://kcytzarvgcpzxgyyxqbk.supabase.co';       // ← Replace
-const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtjeXR6YXJ2Z2NwenhneXl4cWJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgwODI5MjAsImV4cCI6MjA5MzY1ODkyMH0.XWFyzOhpLdYmd-0NK-YA1Ic0-_tHolwFFXI9stKC0W0';  // ← Replace
+const SUPABASE_URL  = 'https://rydabwdwowwvxygvitrb.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ5ZGFid2R3b3d3dnh5Z3ZpdHJiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI5NzQ2MDksImV4cCI6MjEwODU1MDYwOX0.hnlju8bdeE5Yckv7geKHUpD2wtDUwGXMrnVqq4TY8DQ';
 
 const ALLOWED_USERS = ['ig.tawhid@gmail.com', 'choudharyafreen842@gmail.com'];
 
@@ -271,14 +271,8 @@ async function initApp(user) {
   // Navigate to Dashboard by default
   navigateTo('dashboard');
 
-  // Load messages (for drafts)
-  await loadMessages();
-
   // Subscribe to realtime
   subscribeRealtime();
-
-  // Mark messages as seen
-  await markMessagesSeen();
 
   // Start heartbeat
   startHeartbeat(email);
@@ -286,9 +280,12 @@ async function initApp(user) {
   // Start polling other user's status
   startStatusPoll();
 
-  // Load tasks & notes
-  await loadTasks();
-  await loadNotes();
+  // Load data in parallel
+  await Promise.all([
+    loadMessages().then(() => markMessagesSeen()),
+    loadTasks(),
+    loadNotes()
+  ]);
 
   // Init study timer
   initTimer();
@@ -326,19 +323,48 @@ async function updateLastActive(email) {
 }
 
 async function loadMessages() {
+  const cached = localStorage.getItem('draftly_messages');
+  if (cached && allMessages.length === 0) {
+    try {
+      allMessages = JSON.parse(cached);
+      renderMessages();
+    } catch(e) {}
+  }
+
   const { data, error } = await sb.from('messages')
     .select('*')
-    .order('created_at', { ascending: false })
-    .limit(50);
+    .order('created_at', { ascending: false });
 
   if (error) { console.error('loadMessages:', error.message); return; }
 
   allMessages = (data || []).reverse();
+  localStorage.setItem('draftly_messages', JSON.stringify(allMessages));
   renderMessages();
 }
 
 async function sendMessage(content) {
   if (!content.trim()) return;
+
+  // Optimistic UI update
+  const newMsg = {
+    id: 'temp-' + Date.now(),
+    content: content.trim(),
+    sender: currentUser.email.toLowerCase(),
+    seen: false,
+    created_at: new Date().toISOString()
+  };
+  
+  // Instantly broadcast to other user over WebSocket
+  if (realtimeChan) {
+    realtimeChan.send({
+      type: 'broadcast',
+      event: 'new-message',
+      payload: newMsg
+    });
+  }
+
+  allMessages.push(newMsg);
+  renderMessages();
 
   const { error } = await sb.from('messages').insert({
     content: content.trim(),
@@ -346,7 +372,12 @@ async function sendMessage(content) {
     seen:    false,
   });
 
-  if (error) console.error('sendMessage:', error.message);
+  if (error) {
+    console.error('sendMessage:', error.message);
+    // Remove the failed temporary message
+    allMessages = allMessages.filter(m => m.id !== newMsg.id);
+    renderMessages();
+  }
 }
 
 async function markMessagesSeen() {
@@ -385,16 +416,36 @@ function subscribeRealtime() {
   if (realtimeChan) sb.removeChannel(realtimeChan);
 
   realtimeChan = sb
-    .channel('draftly-room')
+    .channel('draftly-room', { config: { broadcast: { self: false } } })
 
-    // New messages
+    // Instant Broadcast from other user
+    .on('broadcast', { event: 'new-message' }, async ({ payload }) => {
+      const msg = payload;
+      // Add broadcasted optimistic message
+      allMessages.push(msg);
+      renderMessages();
+      
+      // Mark seen
+      if (msg.sender === otherEmail) {
+        await markMessagesSeen();
+      }
+    })
+
+    // New messages (from DB)
     .on('postgres_changes', {
       event: 'INSERT',
       schema: 'public',
       table: 'messages',
     }, async payload => {
       const msg = payload.new;
-      allMessages.push(msg);
+      const tempIdx = allMessages.findIndex(m => String(m.id).startsWith('temp-') && m.content === msg.content && m.sender === msg.sender);
+      
+      if (tempIdx !== -1) {
+        allMessages[tempIdx] = msg;
+      } else {
+        allMessages.push(msg);
+      }
+      
       renderMessages();
 
       // If the new message is from the other user, mark it seen
@@ -460,6 +511,8 @@ function renderMessages() {
 
   UI.feedEmpty.classList.add('hidden');
   const myEmail = currentUser.email.toLowerCase();
+
+  const fragment = document.createDocumentFragment();
 
   allMessages.forEach((msg, idx) => {
     const isSelf  = msg.sender.toLowerCase() === myEmail;
@@ -582,8 +635,10 @@ function renderMessages() {
       entry.appendChild(seen);
     }
 
-    feed.appendChild(entry);
+    fragment.appendChild(entry);
   });
+
+  feed.appendChild(fragment);
 
   scrollToBottom();
 }
@@ -685,13 +740,14 @@ async function handleSend() {
   if (isEditing) cancelEditMessage();
 
   clearTimeout(typingTimer);
-  await setTyping(false);
+  setTyping(false); // Fire and forget so we don't delay message sending
 
   if (isEditing) {
-    const { error } = await sb.from('messages').update({ content: content.trim() }).eq('id', currentEditId);
-    if (error) showToast('Failed to edit message.', 'error');
+    sb.from('messages').update({ content: content.trim() }).eq('id', currentEditId).then(({ error }) => {
+      if (error) showToast('Failed to edit message.', 'error');
+    });
   } else {
-    await sendMessage(content);
+    sendMessage(content); // No await, runs in background
   }
   
   UI.sendBtn.disabled = false;
@@ -911,12 +967,22 @@ UI.dashGotoNotes.addEventListener('click', e => { e.preventDefault(); navigateTo
 let allTasks = [];
 
 async function loadTasks() {
+  const cached = localStorage.getItem('draftly_tasks');
+  if (cached && allTasks.length === 0) {
+    try {
+      allTasks = JSON.parse(cached);
+      renderTasks();
+      updateDashboardStats();
+    } catch(e) {}
+  }
+
   const { data, error } = await sb.from('tasks')
     .select('*')
     .order('created_at', { ascending: false })
-    .limit(50);
+    .limit(10);
   if (error) { console.warn('loadTasks:', error.message); return; }
   allTasks = (data || []).reverse();
+  localStorage.setItem('draftly_tasks', JSON.stringify(allTasks));
   renderTasks();
   updateDashboardStats();
 }
@@ -924,6 +990,8 @@ async function loadTasks() {
 function renderTasks() {
   UI.tasksList.querySelectorAll('.task-item').forEach(el => el.remove());
   UI.tasksEmpty.classList.toggle('hidden', allTasks.length > 0);
+
+  const fragment = document.createDocumentFragment();
 
   allTasks.forEach(task => {
     const item = document.createElement('div');
@@ -937,8 +1005,10 @@ function renderTasks() {
       <span class="task-time">${formatTime(task.created_at)}</span>
       <button class="item-delete" data-id="${task.id}" title="Delete">✕</button>
     `;
-    UI.tasksList.appendChild(item);
+    fragment.appendChild(item);
   });
+  
+  UI.tasksList.appendChild(fragment);
 }
 
 UI.taskAddBtn.addEventListener('click', addTask);
@@ -996,12 +1066,22 @@ UI.tasksList.addEventListener('click', async e => {
 let allNotes = [];
 
 async function loadNotes() {
+  const cached = localStorage.getItem('draftly_notes');
+  if (cached && allNotes.length === 0) {
+    try {
+      allNotes = JSON.parse(cached);
+      renderNotes();
+      updateDashboardStats();
+    } catch(e) {}
+  }
+
   const { data, error } = await sb.from('notes')
     .select('*')
     .order('created_at', { ascending: false })
-    .limit(50);
+    .limit(10);
   if (error) { console.warn('loadNotes:', error.message); return; }
   allNotes = (data || []).reverse();
+  localStorage.setItem('draftly_notes', JSON.stringify(allNotes));
   renderNotes();
   updateDashboardStats();
 }
@@ -1009,6 +1089,8 @@ async function loadNotes() {
 function renderNotes() {
   UI.notesList.querySelectorAll('.note-item').forEach(el => el.remove());
   UI.notesEmpty.classList.toggle('hidden', allNotes.length > 0);
+
+  const fragment = document.createDocumentFragment();
 
   [...allNotes].reverse().forEach(note => {
     const item = document.createElement('div');
@@ -1021,8 +1103,10 @@ function renderNotes() {
         <button class="item-delete" data-id="${note.id}" title="Delete">✕</button>
       </div>
     `;
-    UI.notesList.appendChild(item);
+    fragment.appendChild(item);
   });
+
+  UI.notesList.appendChild(fragment);
 }
 
 UI.noteAddBtn.addEventListener('click', addNote);
