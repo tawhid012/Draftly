@@ -550,6 +550,43 @@ textarea { resize: none; }
 .messages-feed::-webkit-scrollbar-track { background: transparent; }
 .messages-feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
+/* Load Earlier Messages Banner */
+.feed-limit-banner {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0 14px;
+  width: 100%;
+}
+
+.btn-load-earlier {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 6px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-load-earlier:hover {
+  background: var(--surface-alt);
+  border-color: var(--text-muted);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
+}
+
+.btn-load-earlier:active {
+  transform: translateY(0);
+}
+
 .feed-empty {
   display: flex;
   flex-direction: column;

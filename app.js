@@ -37,6 +37,8 @@ let statusPollTimer = null; // interval for other user status
 let isTyping      = false;  // local typing state
 let realtimeChan  = null;   // Supabase realtime channel
 let allMessages      = [];     // cached messages array
+const MESSAGE_RENDER_LIMIT = 100; // render latest 100 messages for performance
+let messageRenderLimit     = MESSAGE_RENDER_LIMIT;
 let editingMessageId = null;   // ID of message being edited
 
 // ─────────────────────────────────────────────
@@ -338,7 +340,7 @@ async function loadMessages() {
   if (error) { console.error('loadMessages:', error.message); return; }
 
   allMessages = (data || []).reverse();
-  localStorage.setItem('draftly_messages', JSON.stringify(allMessages));
+  localStorage.setItem('draftly_messages', JSON.stringify(allMessages.slice(-MESSAGE_RENDER_LIMIT)));
   renderMessages();
 }
 
@@ -499,10 +501,12 @@ function subscribeRealtime() {
 // 12. RENDER MESSAGES
 // ─────────────────────────────────────────────
 
-function renderMessages() {
+function renderMessages(options = {}) {
   const feed = UI.messagesFeed;
 
   feed.querySelectorAll('.draft-entry').forEach(el => el.remove());
+  const existingBanner = feed.querySelector('.feed-limit-banner');
+  if (existingBanner) existingBanner.remove();
 
   if (allMessages.length === 0) {
     UI.feedEmpty.classList.remove('hidden');
@@ -514,9 +518,35 @@ function renderMessages() {
 
   const fragment = document.createDocumentFragment();
 
-  allMessages.forEach((msg, idx) => {
+  // Render only the latest messages (capped at 100 by default for speed & smoothness)
+  const messagesToRender = allMessages.length > messageRenderLimit
+    ? allMessages.slice(-messageRenderLimit)
+    : allMessages;
+
+  // Show button to load earlier messages if there are any
+  if (allMessages.length > messagesToRender.length) {
+    const hiddenCount = allMessages.length - messagesToRender.length;
+    const banner = document.createElement('div');
+    banner.className = 'feed-limit-banner';
+
+    const loadBtn = document.createElement('button');
+    loadBtn.type = 'button';
+    loadBtn.className = 'btn-load-earlier';
+    loadBtn.innerHTML = `&#8593; Load earlier messages (${hiddenCount} older)`;
+    loadBtn.addEventListener('click', () => {
+      const prevScrollHeight = feed.scrollHeight;
+      const prevScrollTop = feed.scrollTop;
+      messageRenderLimit += MESSAGE_RENDER_LIMIT;
+      renderMessages({ keepScroll: true, prevScrollHeight, prevScrollTop });
+    });
+
+    banner.appendChild(loadBtn);
+    fragment.appendChild(banner);
+  }
+
+  messagesToRender.forEach((msg, idx) => {
     const isSelf  = msg.sender.toLowerCase() === myEmail;
-    const isLast  = idx === allMessages.length - 1;
+    const isLast  = idx === messagesToRender.length - 1;
     const isLastFromSelf = isSelf && isLast;
     const msgType = msg.type || 'text';
 
@@ -640,7 +670,14 @@ function renderMessages() {
 
   feed.appendChild(fragment);
 
-  scrollToBottom();
+  if (options && options.keepScroll && options.prevScrollHeight != null) {
+    const originalBehavior = feed.style.scrollBehavior;
+    feed.style.scrollBehavior = 'auto';
+    feed.scrollTop = options.prevScrollTop + (feed.scrollHeight - options.prevScrollHeight);
+    feed.style.scrollBehavior = originalBehavior;
+  } else {
+    scrollToBottom();
+  }
 }
 
 // ─────────────────────────────────────────────
